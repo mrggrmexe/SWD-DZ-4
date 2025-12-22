@@ -1,0 +1,122 @@
+###############################################################################
+# SWD-DZ-4 — robust .gitignore for .NET 9 + Rider on macOS
+# Focus: keep repo clean, avoid committing build artifacts, IDE files, secrets.
+###############################################################################
+
+# ---------------------------
+# macOS / OS junk
+# ---------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# ---------------------------
+# JetBrains Rider / IntelliJ
+# ---------------------------
+.idea/
+*.sln.iml
+*.iws
+*.ipr
+**/*.DotSettings.user
+**/*.DotSettings.user.*
+**/*ReSharper*/**
+**/*.resharper
+**/*.ReSharper.user
+**/*.ReSharper.user.*
+**/*.Rider.user
+
+# ---------------------------
+# Visual Studio / VS Code (на всякий случай)
+# ---------------------------
+.vs/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vspscc
+*.vssscc
+
+# ---------------------------
+# .NET build outputs
+# ---------------------------
+**/bin/
+**/obj/
+**/out/
+**/artifacts/
+**/TestResults/
+**/CoverageResults/
+
+# NuGet: обычно packages/ не нужен, если не используешь packages.config
+**/packages/
+
+# ---------------------------
+# Logs / temp / backups
+# ---------------------------
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.orig
+*.pid
+
+# ---------------------------
+# User-specific project files
+# ---------------------------
+**/*.csproj.user
+**/*.fsproj.user
+**/*.vbproj.user
+**/*.publishproj.user
+
+# ---------------------------
+# Publish / deployment outputs
+# ---------------------------
+**/publish/
+**/*.publishsettings
+
+# ---------------------------
+# Docker local overrides / volumes (если появятся)
+# ---------------------------
+docker-compose.override.yml
+**/*.local.yml
+
+# ---------------------------
+# Environment files
+# ---------------------------
+.env
+.env.*
+!.env.example
+
+# ---------------------------
+# Secrets / certs / keys (никогда не коммитим)
+# ---------------------------
+**/secrets*.json
+**/*secret*.json
+**/*apikey*.json
+**/*api_key*.json
+**/*.pfx
+**/*.snk
+**/*.pem
+**/*.key
+**/*.crt
+**/*.cer
+
+# ---------------------------
+# EF Core (опционально)
+# Если ты генерируешь миграции — НЕ игнорируй Migrations/.
+# Поэтому здесь ничего не добавляем.
+# ---------------------------
+
+# ---------------------------
+# Misc
+# ---------------------------
+*.nupkg
+*.db
+*.sqlite
+*.sqlite3

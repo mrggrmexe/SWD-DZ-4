@@ -1,0 +1,148 @@
+# =====================================================================
+# SWD-DZ-4 — robust .editorconfig for .NET 9 + Rider (macOS friendly)
+# =====================================================================
+
+root = true
+
+# ---------------------------
+# Global
+# ---------------------------
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# ---------------------------
+# Solution / project files
+# ---------------------------
+[*.sln]
+indent_style = tab
+
+[*.csproj]
+indent_size = 2
+
+[*.props]
+indent_size = 2
+
+[*.targets]
+indent_size = 2
+
+# ---------------------------
+# JSON / YAML / Docker
+# ---------------------------
+[*.json]
+indent_size = 2
+
+[*.yml]
+indent_size = 2
+
+[*.yaml]
+indent_size = 2
+
+[Dockerfile]
+indent_size = 2
+
+[*.dockerignore]
+indent_size = 2
+
+# ---------------------------
+# Markdown / text
+# ---------------------------
+[*.md]
+indent_size = 2
+
+[*.txt]
+indent_size = 2
+
+# ---------------------------
+# C# / .NET conventions
+# ---------------------------
+[*.cs]
+# Formatting
+csharp_new_line_before_open_brace = all
+csharp_new_line_between_query_expression_clauses = true
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_indent_labels = flush_left
+csharp_preserve_single_line_statements = false
+csharp_preserve_single_line_blocks = true
+
+# "var" preferences (explicit is usually clearer for учебных проектов)
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = false:suggestion
+csharp_style_var_elsewhere = false:suggestion
+
+# Expression-bodied members (не перегибаем)
+csharp_style_expression_bodied_methods = false:suggestion
+csharp_style_expression_bodied_constructors = false:suggestion
+csharp_style_expression_bodied_operators = true:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_style_expression_bodied_indexers = true:suggestion
+csharp_style_expression_bodied_accessors = true:suggestion
+
+# Using directives
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = true
+
+# Qualification (не требуем this. везде)
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+
+# Null checks and patterns
+dotnet_style_null_propagation = true:suggestion
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:suggestion
+
+# Modern C# preference
+dotnet_style_prefer_switch_expression = true:suggestion
+dotnet_style_prefer_pattern_matching = true:suggestion
+dotnet_style_prefer_conditional_expression_over_assignment = true:suggestion
+dotnet_style_prefer_conditional_expression_over_return = true:suggestion
+
+# ---------------------------
+# Naming rules (разумный минимум)
+# ---------------------------
+
+# Interfaces start with I
+dotnet_naming_rule.interfaces_should_begin_with_i.severity = suggestion
+dotnet_naming_rule.interfaces_should_begin_with_i.symbols = interfaces
+dotnet_naming_rule.interfaces_should_begin_with_i.style = interface_prefix
+
+dotnet_naming_symbols.interfaces.applicable_kinds = interface
+dotnet_naming_symbols.interfaces.applicable_accessibilities = public, internal, private, protected, protected_internal, private_protected
+
+dotnet_naming_style.interface_prefix.required_prefix = I
+dotnet_naming_style.interface_prefix.capitalization = pascal_case
+
+# Types in PascalCase
+dotnet_naming_rule.types_pascal_case.severity = suggestion
+dotnet_naming_rule.types_pascal_case.symbols = types
+dotnet_naming_rule.types_pascal_case.style = pascal_case_style
+
+dotnet_naming_symbols.types.applicable_kinds = class, struct, interface, enum, delegate
+dotnet_naming_symbols.types.applicable_accessibilities = public, internal
+
+dotnet_naming_style.pascal_case_style.capitalization = pascal_case
+
+# ---------------------------
+# Analyzer / style severities
+# (не делаем всё error, чтобы Rider не "краснил" проект постоянно)
+# ---------------------------
+dotnet_analyzer_diagnostic.severity = suggestion
+
+# Useful core suggestions
+dotnet_diagnostic.IDE0005.severity = suggestion  # remove unnecessary usings
+dotnet_diagnostic.IDE0058.severity = suggestion  # unused expression value
+dotnet_diagnostic.IDE0060.severity = suggestion  # remove unused parameter (можно поднять до warning позже)
+
+# ---------------------------
+# Tests: допускаем чуть больше свободы
+# ---------------------------
+[tests/**/*.cs]
+# В тестах часто удобнее "var"
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = true:suggestion
