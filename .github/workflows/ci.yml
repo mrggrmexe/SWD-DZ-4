@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master", "dev"]
+  pull_request:
+    branches: ["main", "master", "dev"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  # Делает кэш NuGet предсказуемым
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+  # Стабильнее для логов и диагностики
+  ASPNETCORE_ENVIRONMENT: Testing
+
+jobs:
+  build-run-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            .nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/*.sln', 'global.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Diagnostics (dotnet + docker)
+        run: |
+          dotnet --info
+          docker version
+          docker info
+
+      - name: Resolve solution file
+        id: sln
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "AsyncShopPlatform.sln" ]; then
+            echo "path=AsyncShopPlatform.sln" >> $GITHUB_OUTPUT
+          else
+            SLN="$(ls -1 *.sln 2>/dev/null | head -n 1 || true)"
+            if [ -z "$SLN" ]; then
+              echo "No .sln found in repo root. Please put solution in root or update workflow." >&2
+              exit 1
+            fi
+            echo "path=$SLN" >> $GITHUB_OUTPUT
+          fi
+          echo "Using solution: $(cat $GITHUB_OUTPUT | grep '^path=' | cut -d= -f2)"
+
+      - name: Restore
+        run: dotnet restore "${{ steps.sln.outputs.path }}"
+
+      - name: Build (Release)
+        run: dotnet build "${{ steps.sln.outputs.path }}" -c Release --no-restore
+
+      # "Запуск" системы — поднимаем compose из папки deploy
+      - name: Docker Compose Up (build + wait)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f "deploy/docker-compose.yml" ]; then
+            echo "deploy/docker-compose.yml not found. Update the path or add compose file." >&2
+            exit 1
+          fi
+
+          # --wait будет ждать running/healthy (если healthcheck определены)
+          docker compose -f deploy/docker-compose.yml -p swd-dz4-ci up -d --build --wait --wait-timeout 180
+
+          docker compose -f deploy/docker-compose.yml -p swd-dz4-ci ps
+
+      # Небольшой smoke-check: не валим весь CI, полезно увидеть логи если что-то не стартует
+      - name: Smoke check (optional)
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # Если у тебя gateway на 8080 и есть /health — отлично. Если нет, шаг просто не уронит job.
+          curl -fsS http://localhost:8080/health || true
+          curl -fsS http://localhost:8080/health/live || true
+
+      - name: Test (all test projects)
+        run: |
+          # Тесты лежат в /tests, поэтому целимся туда (надёжнее, чем надеяться на включение в .sln)
+          dotnet test ./tests -c Release --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            **/*.trx
+
+      - name: Docker Compose Down (always)
+        if: always()
+        run: docker compose -f deploy/docker-compose.yml -p swd-dz4-ci down -v --remove-orphans
