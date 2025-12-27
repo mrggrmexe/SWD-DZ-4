@@ -1,0 +1,88 @@
+# =========================
+# SWD-DZ-4 — robust .dockerignore (safe for .NET 9 + Rider)
+# =========================
+
+# --- VCS / metadata ---
+.git
+.git/**
+
+# If you build images from repo root, CI configs aren't needed in context
+.github
+.github/**
+
+# --- IDE / editor junk ---
+.idea
+.idea/**
+.vs
+.vs/**
+.vscode
+.vscode/**
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+*.ReSharper.user
+**/*.csproj.user
+**/*.csproj.DotSettings.user
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+
+# --- Build outputs (most important) ---
+**/bin/
+**/obj/
+**/out/
+**/artifacts/
+**/TestResults/
+**/CoverageResults/
+
+# --- Logs / temp / caches ---
+**/*.log
+**/*.tmp
+**/*.cache
+**/*.bak
+**/*.swp
+**/*.pid
+**/*.pdb
+**/*.orig
+
+# --- NuGet / local package folders (not needed inside build context) ---
+**/packages/
+**/.nuget/
+**/.packages/
+
+# --- Node/web artifacts (in case a frontend appears) ---
+**/node_modules/
+**/dist/
+**/build/
+
+# --- Local env files ---
+.env
+.env.*
+!.env.example
+
+# --- Secrets / certs / keys (do not ship into build context) ---
+**/*.pfx
+**/*.snk
+**/*.pem
+**/*.key
+**/secrets*.json
+**/*secret*.json
+**/*apikey*.json
+**/*api_key*.json
+
+# --- Repo-only docs/deploy (reduce context if building from repo root) ---
+docs/
+docs/**
+deploy/
+deploy/**
+
+# --- HTTP scratch files (Rider/VS) ---
+**/*.http
+**/*.rest
+
+# --- Docker output archives ---
+**/*.tar
+**/*.tgz
