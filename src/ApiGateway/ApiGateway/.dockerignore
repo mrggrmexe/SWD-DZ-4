@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+**/out/
+**/artifacts/
+**/TestResults/
+**/.vs/
+**/.idea/
+**/.vscode/
+**/*.user
+**/*.suo
+**/*.log
+.git/
+.github/
+docs/
+deploy/
