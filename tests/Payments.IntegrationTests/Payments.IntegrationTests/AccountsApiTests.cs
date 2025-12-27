@@ -1,6 +1,6 @@
 namespace Payments.IntegrationTests;
 
-public class IdempotencyTests
+public class AccountsApiTests
 {
     
 }

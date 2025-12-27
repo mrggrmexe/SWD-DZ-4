@@ -1,6 +1,6 @@
 namespace Orders.IntegrationTests;
 
-public class OrderFlowTests
+public class OrdersApiTests
 {
     
 }

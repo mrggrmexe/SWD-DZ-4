@@ -1,6 +1,6 @@
 namespace Orders.IntegrationTests;
 
-public class TestAppFactory
+public class PaymentsResultsConsumerTests
 {
     
 }

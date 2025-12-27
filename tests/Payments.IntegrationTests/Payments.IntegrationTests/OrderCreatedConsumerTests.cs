@@ -1,6 +1,6 @@
 namespace Payments.IntegrationTests;
 
-public class ConcurrencyTests
+public class OrderCreatedConsumerTests
 {
     
 }
