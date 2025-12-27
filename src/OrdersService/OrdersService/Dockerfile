@@ -1,5 +1,4 @@
-# syntax=docker/dockerfile:1
-
+﻿# syntax=docker/dockerfile:1
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
@@ -8,15 +7,13 @@ COPY Directory.Build.props ./
 COPY Directory.Packages.props ./
 COPY AsyncShopPlatform.sln ./
 
-# Contracts здесь НЕ обязателен, если gateway не ссылается на него,
-# но оставляем на будущее/унификацию (без вреда)
+# ВАЖНО: двойные пути
 COPY src/Contracts/Contracts/Contracts.csproj src/Contracts/Contracts/
-COPY src/ApiGateway/ApiGateway/ApiGateway.csproj src/ApiGateway/ApiGateway/
-
-RUN dotnet restore src/ApiGateway/ApiGateway/ApiGateway.csproj
+COPY src/OrdersService/OrdersService/OrdersService.csproj src/OrdersService/OrdersService/
+RUN dotnet restore src/OrdersService/OrdersService/OrdersService.csproj
 
 COPY . .
-WORKDIR /src/src/ApiGateway/ApiGateway
+WORKDIR /src/src/OrdersService/OrdersService
 RUN dotnet publish -c Release -o /app/publish --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
@@ -26,4 +23,4 @@ EXPOSE 8080
 
 COPY --from=build /app/publish ./
 USER $APP_UID
-ENTRYPOINT ["dotnet", "ApiGateway.dll"]
+ENTRYPOINT ["dotnet", "OrdersService.dll"]

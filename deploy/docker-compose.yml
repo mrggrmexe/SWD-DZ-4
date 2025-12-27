@@ -1,0 +1,15 @@
+services:
+  api-gateway:
+    build:
+      context: ..
+      dockerfile: src/ApiGateway/ApiGateway/Dockerfile
+
+  orders-service:
+    build:
+      context: ..
+      dockerfile: src/OrdersService/OrdersService/Dockerfile
+
+  payments-service:
+    build:
+      context: ..
+      dockerfile: src/PaymentsService/PaymentsService/Dockerfile
