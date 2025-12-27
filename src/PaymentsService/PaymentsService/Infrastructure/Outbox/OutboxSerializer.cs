@@ -1,6 +1,31 @@
+using System.Text.Json;
+using Swd.Dz4.Contracts.Events;
+
 namespace PaymentsService.Infrastructure.Outbox;
 
-public class OutboxSerializer
+public static class OutboxSerializer
 {
-    
+    private static readonly Dictionary<string, Type> KnownTypes = new(StringComparer.Ordinal)
+    {
+        [typeof(PaymentSucceeded).FullName!] = typeof(PaymentSucceeded),
+        [typeof(PaymentFailed).FullName!] = typeof(PaymentFailed)
+    };
+
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNamingPolicy = null,
+        WriteIndented = false
+    };
+
+    public static string Serialize<T>(T message)
+        => JsonSerializer.Serialize(message, Options);
+
+    public static object Deserialize(string messageType, string json)
+    {
+        if (!KnownTypes.TryGetValue(messageType, out var type))
+            throw new InvalidOperationException($"Unknown outbox message type: {messageType}");
+
+        return JsonSerializer.Deserialize(json, type, Options)
+               ?? throw new InvalidOperationException($"Failed to deserialize outbox message type: {messageType}");
+    }
 }
