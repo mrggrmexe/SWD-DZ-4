@@ -87,6 +87,7 @@ SWD-DZ-4/
 
 ### Запуск
 
+
 ```bash
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
