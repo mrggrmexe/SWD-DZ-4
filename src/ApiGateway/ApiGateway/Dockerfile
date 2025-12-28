@@ -3,27 +3,25 @@
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
-COPY global.json ./
-COPY Directory.Build.props ./
+# Central package versions (если есть)
 COPY Directory.Packages.props ./
-COPY AsyncShopPlatform.sln ./
 
-# Contracts здесь НЕ обязателен, если gateway не ссылается на него,
-# но оставляем на будущее/унификацию (без вреда)
-COPY src/Contracts/Contracts/Contracts.csproj src/Contracts/Contracts/
+# Копируем только csproj для restore (кэшируемо)
 COPY src/ApiGateway/ApiGateway/ApiGateway.csproj src/ApiGateway/ApiGateway/
 
 RUN dotnet restore src/ApiGateway/ApiGateway/ApiGateway.csproj
 
+# Теперь копируем всё
 COPY . .
+
 WORKDIR /src/src/ApiGateway/ApiGateway
-RUN dotnet publish -c Release -o /app/publish --no-restore
+RUN dotnet publish -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
-ENV ASPNETCORE_URLS=http://+:8080
+
+ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080
 
 COPY --from=build /app/publish ./
-USER $APP_UID
 ENTRYPOINT ["dotnet", "ApiGateway.dll"]
