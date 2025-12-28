@@ -29,6 +29,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Ensure Docker Compose
+        uses: docker/setup-compose-action@v1
+
+      # -------------------------
+      # Backend (.NET)
+      # -------------------------
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
@@ -38,7 +44,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/*.sln', 'global.json') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/*.sln', 'global.json', 'Directory.Packages.props') }}
           restore-keys: |
             nuget-${{ runner.os }}-
 
@@ -57,53 +63,56 @@ jobs:
             fi
             echo "path=$SLN" >> $GITHUB_OUTPUT
           fi
-          echo "Using solution: ${{ steps.sln.outputs.path }}"
+          echo "Using solution: $(grep -E '^path=' $GITHUB_OUTPUT | cut -d= -f2)"
 
-      - name: Restore
+      - name: Restore (Backend)
         run: dotnet restore "${{ steps.sln.outputs.path }}"
 
-      - name: Build (Release)
+      - name: Build (Backend, Release)
         run: dotnet build "${{ steps.sln.outputs.path }}" -c Release --no-restore
 
-      # --- FRONTEND (optional) ---
-      # Ожидаем по дереву: src/Frontend/Frontend/package.json (подстрой под свой реальный путь)
+      # -------------------------
+      # Frontend (optional)
+      # -------------------------
       - name: Detect frontend
         id: fe
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f "src/Frontend/Frontend/package.json" ]; then
+          if [ -f "src/Frontend/package.json" ]; then
             echo "present=true" >> $GITHUB_OUTPUT
           else
             echo "present=false" >> $GITHUB_OUTPUT
           fi
-          echo "Frontend present: $(cat $GITHUB_OUTPUT | grep present | cut -d= -f2)"
+          echo "Frontend present: $(grep -E '^present=' $GITHUB_OUTPUT | cut -d= -f2)"
 
-      - name: Setup Node (frontend)
+      - name: Setup Node (Frontend)
         if: steps.fe.outputs.present == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: |
-            src/Frontend/Frontend/package-lock.json
+            src/Frontend/package-lock.json
 
       - name: Frontend install
         if: steps.fe.outputs.present == 'true'
-        working-directory: src/Frontend/Frontend
+        working-directory: src/Frontend
         run: npm ci
 
       - name: Frontend test (if present)
         if: steps.fe.outputs.present == 'true'
-        working-directory: src/Frontend/Frontend
+        working-directory: src/Frontend
         run: npm test --if-present
 
       - name: Frontend build
         if: steps.fe.outputs.present == 'true'
-        working-directory: src/Frontend/Frontend
+        working-directory: src/Frontend
         run: npm run build
 
-      # --- DOCKER COMPOSE ---
+      # -------------------------
+      # Run stack (docker compose)
+      # -------------------------
       - name: Compose config validate
         shell: bash
         run: |
@@ -118,46 +127,28 @@ jobs:
           docker compose -f deploy/docker-compose.yml -p swd-dz4-ci up -d --build --wait --wait-timeout 180
           docker compose -f deploy/docker-compose.yml -p swd-dz4-ci ps
 
-      - name: Smoke check (gateway)
+      - name: Smoke check (ApiGateway)
         shell: bash
         run: |
           set -euo pipefail
-          # Gateway (по умолчанию у нас 8080)
-          curl -fsS http://localhost:8080/health || curl -fsS http://localhost:8080/health/live
+          curl -fsS http://localhost:8080/health >/dev/null || curl -fsS http://localhost:8080/health/live >/dev/null
 
-      - name: Smoke check (frontend)
+      - name: Smoke check (Frontend)
         if: steps.fe.outputs.present == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          # Пытаемся найти фронт на типичных портах. Подстрой под compose, если у тебя другой.
-          for url in \
-            "http://localhost:3000" \
-            "http://localhost:5173" \
-            "http://localhost:8083"
-          do
-            echo "Trying $url ..."
-            if curl -fsS "$url/" > /dev/null; then
-              echo "Frontend OK at $url"
-              exit 0
-            fi
-          done
-          echo "Frontend is not reachable on expected ports. Update smoke-check ports or compose mapping." >&2
-          exit 1
+          curl -fsS http://localhost:8083/ >/dev/null
 
-      # --- TESTS ---
-      - name: Test (all)
-        run: |
-          dotnet test ./tests -c Release --logger "trx;LogFileName=test-results.trx"
+      # -------------------------
+      # Tests
+      # -------------------------
+      - name: Test (Backend)
+        run: dotnet test ./tests -c Release --logger "trx;LogFileName=test-results.trx"
 
-      - name: Upload test results (always)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: |
-            **/*.trx
-
+      # -------------------------
+      # Artifacts & cleanup
+      # -------------------------
       - name: Compose logs (always)
         if: always()
         shell: bash
@@ -170,6 +161,14 @@ jobs:
         with:
           name: compose-logs
           path: compose-logs.txt
+
+      - name: Upload test results (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            **/*.trx
 
       - name: Docker Compose Down (always)
         if: always()
