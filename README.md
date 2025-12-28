@@ -65,6 +65,9 @@
 SWD-DZ-4/
 ├── deploy/
 │   └── docker-compose.yml
+|
+├── AsyncShopPlatform/
+|
 ├── src/
 │   ├── ApiGateway/
 │   ├── OrdersService/
@@ -96,6 +99,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 - Frontend: http://localhost:8083
 - ApiGateway: http://localhost:8080
+- RabbitMQ UI: http://localhost:15672
 - Health: http://localhost:8080/health
 
 ---
