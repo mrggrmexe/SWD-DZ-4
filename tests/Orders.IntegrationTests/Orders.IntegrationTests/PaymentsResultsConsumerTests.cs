@@ -24,7 +24,7 @@ public sealed class PaymentResultsConsumerTests : IClassFixture<OrdersPostgresFi
     }
 
     [Fact]
-    public async Task PaymentSucceeded_MovesOrderToFinished()
+    public async Task PaymentSucceededMovesOrderToFinished()
     {
         var userId = "u-order-2";
         var orderId = await CreateOrderAsync(userId, 1500);
@@ -52,7 +52,7 @@ public sealed class PaymentResultsConsumerTests : IClassFixture<OrdersPostgresFi
     }
 
     [Fact]
-    public async Task PaymentFailed_MovesOrderToCancelled()
+    public async Task PaymentFailedMovesOrderToCancelled()
     {
         var userId = "u-order-3";
         var orderId = await CreateOrderAsync(userId, 999);
