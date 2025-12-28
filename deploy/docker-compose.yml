@@ -197,14 +197,6 @@ services:
     ports:
       - "8083:80"
     restart: on-failure:5
-    healthcheck:
-      # проверяем стабильный эндпоинт, а не /
-      test: ["CMD-SHELL", "wget -qO- http://localhost/health >/dev/null 2>&1 || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      # даём nginx спокойно подняться на CI
-      start_period: 20s
     logging:
       driver: "json-file"
       options:
