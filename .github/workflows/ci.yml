@@ -17,15 +17,13 @@ permissions:
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
-  # Делает кэш NuGet предсказуемым
   NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
-  # Стабильнее для логов и диагностики
   ASPNETCORE_ENVIRONMENT: Testing
 
 jobs:
   build-run-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -39,19 +37,12 @@ jobs:
       - name: Cache NuGet packages
         uses: actions/cache@v4
         with:
-          path: |
-            .nuget/packages
+          path: .nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/*.sln', 'global.json') }}
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      - name: Diagnostics (dotnet + docker)
-        run: |
-          dotnet --info
-          docker version
-          docker info
-
-      - name: Resolve solution file
+      - name: Detect solution file
         id: sln
         shell: bash
         run: |
@@ -61,12 +52,12 @@ jobs:
           else
             SLN="$(ls -1 *.sln 2>/dev/null | head -n 1 || true)"
             if [ -z "$SLN" ]; then
-              echo "No .sln found in repo root. Please put solution in root or update workflow." >&2
+              echo "No .sln found in repo root. Put solution in root or update workflow." >&2
               exit 1
             fi
             echo "path=$SLN" >> $GITHUB_OUTPUT
           fi
-          echo "Using solution: $(cat $GITHUB_OUTPUT | grep '^path=' | cut -d= -f2)"
+          echo "Using solution: ${{ steps.sln.outputs.path }}"
 
       - name: Restore
         run: dotnet restore "${{ steps.sln.outputs.path }}"
@@ -74,34 +65,89 @@ jobs:
       - name: Build (Release)
         run: dotnet build "${{ steps.sln.outputs.path }}" -c Release --no-restore
 
-      # "Запуск" системы — поднимаем compose из папки deploy
+      # --- FRONTEND (optional) ---
+      # Ожидаем по дереву: src/Frontend/Frontend/package.json (подстрой под свой реальный путь)
+      - name: Detect frontend
+        id: fe
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "src/Frontend/Frontend/package.json" ]; then
+            echo "present=true" >> $GITHUB_OUTPUT
+          else
+            echo "present=false" >> $GITHUB_OUTPUT
+          fi
+          echo "Frontend present: $(cat $GITHUB_OUTPUT | grep present | cut -d= -f2)"
+
+      - name: Setup Node (frontend)
+        if: steps.fe.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            src/Frontend/Frontend/package-lock.json
+
+      - name: Frontend install
+        if: steps.fe.outputs.present == 'true'
+        working-directory: src/Frontend/Frontend
+        run: npm ci
+
+      - name: Frontend test (if present)
+        if: steps.fe.outputs.present == 'true'
+        working-directory: src/Frontend/Frontend
+        run: npm test --if-present
+
+      - name: Frontend build
+        if: steps.fe.outputs.present == 'true'
+        working-directory: src/Frontend/Frontend
+        run: npm run build
+
+      # --- DOCKER COMPOSE ---
+      - name: Compose config validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "deploy/docker-compose.yml"
+          docker compose -f deploy/docker-compose.yml config > /dev/null
+
       - name: Docker Compose Up (build + wait)
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f "deploy/docker-compose.yml" ]; then
-            echo "deploy/docker-compose.yml not found. Update the path or add compose file." >&2
-            exit 1
-          fi
-
-          # --wait будет ждать running/healthy (если healthcheck определены)
           docker compose -f deploy/docker-compose.yml -p swd-dz4-ci up -d --build --wait --wait-timeout 180
-
           docker compose -f deploy/docker-compose.yml -p swd-dz4-ci ps
 
-      # Небольшой smoke-check: не валим весь CI, полезно увидеть логи если что-то не стартует
-      - name: Smoke check (optional)
+      - name: Smoke check (gateway)
         shell: bash
-        continue-on-error: true
         run: |
           set -euo pipefail
-          # Если у тебя gateway на 8080 и есть /health — отлично. Если нет, шаг просто не уронит job.
-          curl -fsS http://localhost:8080/health || true
-          curl -fsS http://localhost:8080/health/live || true
+          # Gateway (по умолчанию у нас 8080)
+          curl -fsS http://localhost:8080/health || curl -fsS http://localhost:8080/health/live
 
-      - name: Test (all test projects)
+      - name: Smoke check (frontend)
+        if: steps.fe.outputs.present == 'true'
+        shell: bash
         run: |
-          # Тесты лежат в /tests, поэтому целимся туда (надёжнее, чем надеяться на включение в .sln)
+          set -euo pipefail
+          # Пытаемся найти фронт на типичных портах. Подстрой под compose, если у тебя другой.
+          for url in \
+            "http://localhost:3000" \
+            "http://localhost:5173" \
+            "http://localhost:8083"
+          do
+            echo "Trying $url ..."
+            if curl -fsS "$url/" > /dev/null; then
+              echo "Frontend OK at $url"
+              exit 0
+            fi
+          done
+          echo "Frontend is not reachable on expected ports. Update smoke-check ports or compose mapping." >&2
+          exit 1
+
+      # --- TESTS ---
+      - name: Test (all)
+        run: |
           dotnet test ./tests -c Release --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test results (always)
@@ -111,6 +157,19 @@ jobs:
           name: test-results
           path: |
             **/*.trx
+
+      - name: Compose logs (always)
+        if: always()
+        shell: bash
+        run: |
+          docker compose -f deploy/docker-compose.yml -p swd-dz4-ci logs --no-color > compose-logs.txt || true
+
+      - name: Upload compose logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs
+          path: compose-logs.txt
 
       - name: Docker Compose Down (always)
         if: always()
