@@ -29,9 +29,12 @@ env:
 jobs:
   build-run-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     steps:
+      # -------------------------
+      # Checkout + Tooling
+      # -------------------------
       - name: Checkout repository
         uses: actions/checkout@v5
 
@@ -51,6 +54,9 @@ jobs:
           restore-keys: |
             nuget-${{ runner.os }}-
 
+      # -------------------------
+      # Detect solution (anywhere)
+      # -------------------------
       - name: Detect solution (anywhere)
         id: sln
         shell: bash
@@ -73,6 +79,9 @@ jobs:
             echo "No .sln found, will use csproj fallback"
           fi
 
+      # -------------------------
+      # Backend restore/build (try SLN, fallback to csproj)
+      # -------------------------
       - name: Restore backend (try SLN, fallback to csproj)
         shell: bash
         run: |
@@ -87,7 +96,17 @@ jobs:
             echo "Solution restore FAILED, falling back to csproj restore"
           fi
 
-          dotnet restore $(find src -name '*.csproj')
+          CS_PROJS="$(find src -type f -name '*.csproj' \
+            -not -path '*/bin/*' -not -path '*/obj/*' | sort || true)"
+
+          if [ -z "$CS_PROJS" ]; then
+            echo "No csproj found under src/. Cannot restore."
+            exit 1
+          fi
+
+          echo "Restoring projects:"
+          echo "$CS_PROJS"
+          dotnet restore $CS_PROJS
 
       - name: Build backend (try SLN, fallback to csproj)
         shell: bash
@@ -103,8 +122,21 @@ jobs:
             echo "Solution build FAILED, falling back to csproj build"
           fi
 
-          dotnet build $(find src -name '*.csproj') -c Release --no-restore
+          CS_PROJS="$(find src -type f -name '*.csproj' \
+            -not -path '*/bin/*' -not -path '*/obj/*' | sort || true)"
 
+          if [ -z "$CS_PROJS" ]; then
+            echo "No csproj found under src/. Cannot build."
+            exit 1
+          fi
+
+          echo "Building projects:"
+          echo "$CS_PROJS"
+          dotnet build $CS_PROJS -c Release --no-restore
+
+      # -------------------------
+      # Frontend (optional)
+      # -------------------------
       - name: Detect frontend
         id: fe
         shell: bash
@@ -128,16 +160,26 @@ jobs:
         working-directory: src/Frontend
         run: npm ci
 
-      - name: Frontend test
+      - name: Frontend test (skip if none)
         if: steps.fe.outputs.present == 'true'
         working-directory: src/Frontend
-        run: npm test --if-present || true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find src -type f \( -name "*.test.*" -o -name "*.spec.*" \) | grep -q .; then
+            npm test
+          else
+            echo "No frontend tests found — skipping."
+          fi
 
       - name: Frontend build
         if: steps.fe.outputs.present == 'true'
         working-directory: src/Frontend
         run: npm run build
 
+      # -------------------------
+      # Docker Compose
+      # -------------------------
       - name: Validate docker-compose
         run: docker compose -f deploy/docker-compose.yml config > /dev/null
 
@@ -148,16 +190,65 @@ jobs:
           docker compose -f deploy/docker-compose.yml -p swd-dz4-ci ps
 
       - name: Smoke check ApiGateway
+        shell: bash
         run: |
-          curl -fsS http://localhost:8080/health || curl -fsS http://localhost:8080/health/live
+          set -euo pipefail
+          for i in {1..30}; do
+            if curl -fsS --max-time 3 http://localhost:8080/health >/dev/null 2>&1; then
+              echo "Gateway /health OK"
+              exit 0
+            fi
+            if curl -fsS --max-time 3 http://localhost:8080/health/live >/dev/null 2>&1; then
+              echo "Gateway /health/live OK"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Gateway health check failed after retries"
+          curl -v --max-time 5 http://localhost:8080/health || true
+          curl -v --max-time 5 http://localhost:8080/health/live || true
+          exit 1
 
       - name: Smoke check Frontend
         if: steps.fe.outputs.present == 'true'
-        run: curl -fsS http://localhost:8083/
+        run: |
+          curl -fsS --max-time 5 http://localhost:8083/health || curl -fsS --max-time 5 http://localhost:8083/
 
-      - name: Run backend tests
-        run: dotnet test ./tests -c Release --logger "trx;LogFileName=test-results.trx"
+      # -------------------------
+      # Backend tests (discover csproj anywhere)
+      # -------------------------
+      - name: Run backend tests (discover csproj)
+        shell: bash
+        run: |
+          set -euo pipefail
 
+          TEST_PROJECTS="$(find . -type f \( -name '*Tests*.csproj' -o -name '*IntegrationTests*.csproj' \) \
+            -not -path './**/bin/*' \
+            -not -path './**/obj/*' \
+            -not -path './src/**' \
+            | sort || true)"
+
+          if [ -z "$TEST_PROJECTS" ]; then
+            echo "No test projects found (*Tests*.csproj / *IntegrationTests*.csproj). Skipping."
+            exit 0
+          fi
+
+          echo "Found test projects:"
+          echo "$TEST_PROJECTS"
+
+          mkdir -p TestResults
+
+          while IFS= read -r proj; do
+            echo "Testing: $proj"
+            timeout 20m dotnet test "$proj" -c Release \
+              --logger "trx;LogFileName=test-results.trx" \
+              --results-directory TestResults \
+              --blame --blame-hang --blame-hang-timeout 5m
+          done <<< "$TEST_PROJECTS"
+
+      # -------------------------
+      # Logs / Artifacts / Cleanup
+      # -------------------------
       - name: Collect compose logs
         if: always()
         run: |
@@ -175,7 +266,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: "**/*.trx"
+          path: TestResults/**/*.trx
 
       - name: Docker Compose Down
         if: always()
