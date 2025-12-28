@@ -1,6 +1,6 @@
 namespace PaymentsService.Api.Dtos;
 
-public class TopUpRequest
+public sealed record TopUpRequest
 {
-    
+    public required long AmountMinor { get; init; }
 }

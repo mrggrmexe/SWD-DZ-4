@@ -1,6 +1,81 @@
-@PaymentsService_HostAddress = http://localhost:5228
+@userId = demo-user-001
+@paymentsHost = http://localhost:8082
+@gatewayHost = http://localhost:8080
 
-GET {{PaymentsService_HostAddress}}/weatherforecast/
+### Health (root)
+GET {{paymentsHost}}/health
 Accept: application/json
 
-###
+### Health (live)
+GET {{paymentsHost}}/health/live
+Accept: application/json
+
+### Health (ready)
+GET {{paymentsHost}}/health/ready
+Accept: application/json
+
+
+### Create account (direct)
+POST {{paymentsHost}}/accounts
+X-User-Id: {{userId}}
+Accept: application/json
+
+### Create account (through gateway)
+POST {{gatewayHost}}/accounts
+X-User-Id: {{userId}}
+Accept: application/json
+
+
+### Get balance (direct)
+GET {{paymentsHost}}/accounts/balance
+X-User-Id: {{userId}}
+Accept: application/json
+
+### Get balance (through gateway)
+GET {{gatewayHost}}/accounts/balance
+X-User-Id: {{userId}}
+Accept: application/json
+
+
+### Top up (direct)
+POST {{paymentsHost}}/accounts/topup
+X-User-Id: {{userId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+    "amountMinor": 500000
+}
+
+### Top up (through gateway)
+POST {{gatewayHost}}/accounts/topup
+X-User-Id: {{userId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+    "amountMinor": 500000
+}
+
+
+### Negative test: missing header (should be 400)
+GET {{paymentsHost}}/accounts/balance
+Accept: application/json
+
+
+### Negative test: invalid amount (should be 400)
+POST {{paymentsHost}}/accounts/topup
+X-User-Id: {{userId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+    "amountMinor": 0
+}
+
+
+### Scenario: full happy path (manual)
+# 1) Create account
+# 2) Top up
+# 3) Check balance
+# Use requests above in order.
