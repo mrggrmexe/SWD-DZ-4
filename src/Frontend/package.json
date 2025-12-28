@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "lockfileVersion": 3,
   "requires": true,
+
   "packages": {
     "": {
       "name": "swd-dz4-frontend",
@@ -19,6 +20,12 @@
         "vite": "^7.3.0",
         "vitest": "^2.1.9"
       }
+    },
+    "scripts": {
+      "dev": "vite",
+      "build": "vite build",
+      "preview": "vite preview",
+      "test": "vitest run"
     },
     "node_modules/@babel/code-frame": {
       "version": "7.27.1",
@@ -3160,3 +3167,4 @@
     }
   }
 }
+
