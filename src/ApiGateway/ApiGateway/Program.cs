@@ -1,184 +1,124 @@
-using System.Net;
-using Microsoft.AspNetCore.Diagnostics;
+using System.Text.Json;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.Extensions.Primitives;
-using Yarp.ReverseProxy.Health;
-using Yarp.ReverseProxy.Transforms;
-
-using AspNetIpNetwork = Microsoft.AspNetCore.HttpOverrides.IPNetwork;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Yarp.ReverseProxy.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// --------------------
-// Health checks (сам gateway)
-// --------------------
-builder.Services.AddHealthChecks();
+// 1) HealthChecks (для docker-compose/CI)
+builder.Services
+    .AddHealthChecks()
+    .AddCheck<ReverseProxyConfigHealthCheck>(
+        name: "reverse_proxy_config",
+        failureStatus: HealthStatus.Unhealthy,
+        tags: new[] { "ready" });
 
-// --------------------
-// YARP reverse proxy + transforms
-// --------------------
+// 2) Таймауты (нужны, чтобы Route.Timeout из YARP-конфига реально работал)
+builder.Services.AddRequestTimeouts();
+
+// 3) YARP из appsettings.json
 builder.Services
     .AddReverseProxy()
-    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
-    .AddTransforms(transformBuilderContext =>
-    {
-        // Пробрасываем X-Correlation-Id в downstream
-        transformBuilderContext.AddRequestTransform(transformContext =>
-        {
-            if (transformContext.HttpContext.Items.TryGetValue(Correlation.ItemKey, out var cidObj)
-                && cidObj is string cid
-                && !string.IsNullOrWhiteSpace(cid))
-            {
-                // Не дублируем, если клиент уже прислал
-                if (!transformContext.ProxyRequest.Headers.Contains(Correlation.HeaderName))
-                {
-                    transformContext.ProxyRequest.Headers.TryAddWithoutValidation(Correlation.HeaderName, cid);
-                }
-            }
-
-            return ValueTask.CompletedTask;
-        });
-    });
-
-// Настройка пассивных health-check’ов YARP (быстрее реагирует на падения downstream)
-builder.Services.Configure<TransportFailureRateHealthPolicyOptions>(o =>
-{
-    o.DetectionWindowSize = TimeSpan.FromSeconds(30);
-    o.MinimalTotalCountThreshold = 5;
-    o.DefaultFailureRateLimit = 0.5; // 50% ошибок за окно => destination unhealthy
-});
-
-// --------------------
-// Forwarded headers (опционально; важно для .NET 9.0.6+)
-// --------------------
-var forwardedEnabled =
-    builder.Configuration.GetValue("ForwardedHeaders:Enabled", false) ||
-    string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_FORWARDEDHEADERS_ENABLED"), "true", StringComparison.OrdinalIgnoreCase);
-
-if (forwardedEnabled)
-{
-    builder.Services.Configure<ForwardedHeadersOptions>(options =>
-    {
-        options.ForwardedHeaders =
-            ForwardedHeaders.XForwardedFor |
-            ForwardedHeaders.XForwardedProto |
-            ForwardedHeaders.XForwardedHost;
-
-        // В .NET 9.0.6+ X-Forwarded-* игнорируются, если прокси не доверенный.
-        // Поэтому явно разрешаем private-сети (подходит для docker / internal proxies).
-        // В production лучше сузить до конкретных IP вашего ingress/nginx/traefik.
-        options.KnownNetworks.Clear();
-        options.KnownProxies.Clear();
-
-        AddKnownNetwork(options, "127.0.0.0/8");     // loopback
-        AddKnownNetwork(options, "::1/128");         // ipv6 loopback
-        AddKnownNetwork(options, "10.0.0.0/8");      // private
-        AddKnownNetwork(options, "172.16.0.0/12");   // private
-        AddKnownNetwork(options, "192.168.0.0/16");  // private
-
-        options.RequireHeaderSymmetry = false;
-        options.ForwardLimit = 2;
-    });
-}
+    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
 var app = builder.Build();
 
-// --------------------
-// Error handling (единый ответ вместо падения пайплайна)
-// --------------------
-if (!app.Environment.IsDevelopment())
+// Forwarded headers (опционально, выключено по умолчанию в appsettings)
+if (app.Configuration.GetValue<bool>("ForwardedHeaders:Enabled"))
 {
-    app.UseExceptionHandler(errorApp =>
+    // В .NET 8.0.17+/9.0.6+ forwarded headers от неизвестных прокси игнорируются,
+    // поэтому либо задаём Trusted proxy list, либо явно разрешаем "trust all" (небезопасно для интернета).
+    var trustAll = app.Configuration.GetValue<bool>("ForwardedHeaders:TrustAllProxies");
+
+    var options = new ForwardedHeadersOptions
     {
-        errorApp.Run(async context =>
-        {
-            var feature = context.Features.Get<IExceptionHandlerFeature>();
-            var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("ApiGateway");
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor
+                         | ForwardedHeaders.XForwardedProto
+                         | ForwardedHeaders.XForwardedHost,
+        RequireHeaderSymmetry = false
+    };
 
-            logger.LogError(feature?.Error, "Unhandled exception");
-
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            context.Response.ContentType = "application/problem+json";
-
-            await context.Response.WriteAsync("""
-            {"title":"Gateway error","status":500}
-            """);
-        });
-    });
-}
-
-// Forwarded headers должны быть как можно раньше в pipeline
-if (forwardedEnabled)
-{
-    app.UseForwardedHeaders();
-}
-
-// --------------------
-// Correlation ID middleware (стресс-устойчивость для трассировки/логов)
-// --------------------
-app.Use(async (ctx, next) =>
-{
-    var cid = GetOrCreateCorrelationId(ctx);
-    ctx.Items[Correlation.ItemKey] = cid;
-
-    // Отдаём обратно клиенту — удобно дебажить цепочку
-    ctx.Response.OnStarting(() =>
+    if (trustAll)
     {
-        ctx.Response.Headers[Correlation.HeaderName] = cid;
-        return Task.CompletedTask;
-    });
-
-    var logger = ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("ApiGateway");
-    using (logger.BeginScope(new Dictionary<string, object?> { ["CorrelationId"] = cid }))
-    {
-        await next();
+        // Удобно для Docker/CI, но НЕ рекомендовано для публичного интернета.
+        options.KnownNetworks.Clear();
+        options.KnownProxies.Clear();
     }
+
+    app.UseForwardedHeaders(options);
+}
+
+// Включаем middleware таймаутов (см. YARP docs)
+app.UseRequestTimeouts();
+
+// Удобная “точка” для smoke-check
+app.MapGet("/", () => Results.Text("ApiGateway: OK", "text/plain"));
+
+// Liveness: всегда 200
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = _ => false,
+    ResponseWriter = WriteHealthJson
 });
 
-// --------------------
-// Endpoints
-// --------------------
-app.MapGet("/", () => Results.Text("ApiGateway is running"));
+// Readiness: прогоняем checks (в т.ч. наличие Routes/Clusters)
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    Predicate = _ => true,
+    ResponseWriter = WriteHealthJson
+});
 
-app.MapHealthChecks("/health/live");
-app.MapHealthChecks("/health/ready");
-
-// Встроенный pipeline MapReverseProxy включает нужные middleware (в т.ч. passive health checks). :contentReference[oaicite:1]{index=1}
+// Сам reverse proxy
 app.MapReverseProxy();
 
 app.Run();
 
-// --------------------
-// helpers
-// --------------------
-static string GetOrCreateCorrelationId(HttpContext ctx)
+static Task WriteHealthJson(HttpContext context, HealthReport report)
 {
-    if (ctx.Request.Headers.TryGetValue(Correlation.HeaderName, out StringValues existing) &&
-        !StringValues.IsNullOrEmpty(existing))
+    context.Response.ContentType = "application/json; charset=utf-8";
+
+    var payload = new
     {
-        var val = existing.ToString().Trim();
-        if (!string.IsNullOrWhiteSpace(val))
-            return val;
+        status = report.Status.ToString(),
+        totalDurationMs = (long)report.TotalDuration.TotalMilliseconds,
+        checks = report.Entries.Select(e => new
+        {
+            name = e.Key,
+            status = e.Value.Status.ToString(),
+            description = e.Value.Description,
+            durationMs = (long)e.Value.Duration.TotalMilliseconds
+        })
+    };
+
+    return context.Response.WriteAsync(JsonSerializer.Serialize(payload));
+}
+
+sealed class ReverseProxyConfigHealthCheck : IHealthCheck
+{
+    private readonly IProxyConfigProvider _provider;
+
+    public ReverseProxyConfigHealthCheck(IProxyConfigProvider provider)
+    {
+        _provider = provider;
     }
 
-    // Компактный формат для логов/заголовков
-    return Guid.NewGuid().ToString("N");
-}
+    public Task<HealthCheckResult> CheckHealthAsync(
+        HealthCheckContext context,
+        CancellationToken cancellationToken = default)
+    {
+        var cfg = _provider.GetConfig();
 
-static void AddKnownNetwork(ForwardedHeadersOptions options, string cidr)
-{
-    // Поддержка и IPv4 и IPv6 в одном методе
-    var parts = cidr.Split('/', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-    if (parts.Length != 2) return;
+        var routesCount = cfg.Routes.Count;
+        var clustersCount = cfg.Clusters.Count;
 
-    if (!IPAddress.TryParse(parts[0], out var ip)) return;
-    if (!int.TryParse(parts[1], out var prefix)) return;
+        if (routesCount <= 0 || clustersCount <= 0)
+        {
+            return Task.FromResult(HealthCheckResult.Unhealthy(
+                description: "ReverseProxy config is empty (no routes/clusters). Check appsettings and build output."));
+        }
 
-    options.KnownNetworks.Add(new AspNetIpNetwork(ip, prefix));
-}
-
-static class Correlation
-{
-    public const string HeaderName = "X-Correlation-Id";
-    public const string ItemKey = "CorrelationId";
+        return Task.FromResult(HealthCheckResult.Healthy(
+            description: $"routes={routesCount}, clusters={clustersCount}"));
+    }
 }
