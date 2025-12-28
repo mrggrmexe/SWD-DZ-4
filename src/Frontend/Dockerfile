@@ -3,17 +3,22 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+# Copy only manifests first for caching
+COPY src/Frontend/package.json src/Frontend/package-lock.json ./
 RUN npm ci
 
-COPY . .
+# Copy frontend sources
+COPY src/Frontend/ ./
+
 RUN npm run build
 
 FROM nginx:alpine AS runtime
 WORKDIR /usr/share/nginx/html
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Correct path (because build context is repo root)
+COPY src/Frontend/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy built files
 COPY --from=build /app/dist ./
 
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
