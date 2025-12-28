@@ -26,21 +26,12 @@ jobs:
     timeout-minutes: 40
 
     steps:
-      # -------------------------
-      # Checkout
-      # -------------------------
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      # -------------------------
-      # Docker / Compose
-      # -------------------------
       - name: Ensure Docker Compose
         uses: docker/setup-compose-action@v1
 
-      # -------------------------
-      # .NET 9
-      # -------------------------
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
         with:
@@ -50,28 +41,23 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/*.sln', 'global.json', 'Directory.Packages.props') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.props', '**/*.targets', '**/*.sln', 'global.json', 'Directory.Packages.props', 'NuGet.Config') }}
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      # -------------------------
-      # Detect solution (ANYWHERE) or fallback
-      # -------------------------
-      - name: Detect solution or fallback to csproj build
+      # -------- Find SLN anywhere --------
+      - name: Detect solution (anywhere)
         id: sln
         shell: bash
         run: |
           set -euo pipefail
-
-          SLN="$(find . \
-            -type f -name '*.sln' \
+          SLN="$(find . -type f -name '*.sln' \
             -not -path './.git/*' \
             -not -path './.github/*' \
             -not -path './**/node_modules/*' \
             -not -path './**/bin/*' \
             -not -path './**/obj/*' \
             | head -n 1 || true)"
-
           if [ -n "$SLN" ]; then
             echo "found=true" >> "$GITHUB_OUTPUT"
             echo "path=$SLN" >> "$GITHUB_OUTPUT"
@@ -79,31 +65,39 @@ jobs:
           else
             echo "found=false" >> "$GITHUB_OUTPUT"
             echo "path=" >> "$GITHUB_OUTPUT"
-            echo "No .sln found. Will build via ./src fallback."
+            echo "No .sln found, will use ./src fallback"
           fi
 
-      # -------------------------
-      # Backend restore / build
-      # -------------------------
-      - name: Restore backend (via SLN)
-        if: steps.sln.outputs.found == 'true'
-        run: dotnet restore "${{ steps.sln.outputs.path }}"
+      # -------- Restore/Build with fallback --------
+      - name: Restore backend (try SLN, fallback to src)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.sln.outputs.found }}" = "true" ]; then
+            echo "Trying restore with solution: ${{ steps.sln.outputs.path }}"
+            if dotnet restore "${{ steps.sln.outputs.path }}"; then
+              echo "Solution restore OK"
+              exit 0
+            fi
+            echo "Solution restore FAILED, fallback to ./src"
+          fi
+          dotnet restore ./src
 
-      - name: Build backend (via SLN)
-        if: steps.sln.outputs.found == 'true'
-        run: dotnet build "${{ steps.sln.outputs.path }}" -c Release --no-restore
+      - name: Build backend (try SLN, fallback to src)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.sln.outputs.found }}" = "true" ]; then
+            echo "Trying build with solution: ${{ steps.sln.outputs.path }}"
+            if dotnet build "${{ steps.sln.outputs.path }}" -c Release --no-restore; then
+              echo "Solution build OK"
+              exit 0
+            fi
+            echo "Solution build FAILED, fallback to ./src"
+          fi
+          dotnet build ./src -c Release --no-restore
 
-      - name: Restore backend (fallback via src)
-        if: steps.sln.outputs.found != 'true'
-        run: dotnet restore ./src
-
-      - name: Build backend (fallback via src)
-        if: steps.sln.outputs.found != 'true'
-        run: dotnet build ./src -c Release --no-restore
-
-      # -------------------------
-      # Frontend
-      # -------------------------
+      # -------- Frontend --------
       - name: Detect frontend
         id: fe
         shell: bash
@@ -137,9 +131,7 @@ jobs:
         working-directory: src/Frontend
         run: npm run build
 
-      # -------------------------
-      # Docker Compose
-      # -------------------------
+      # -------- Docker Compose --------
       - name: Validate docker-compose
         run: docker compose -f deploy/docker-compose.yml config > /dev/null
 
@@ -149,27 +141,20 @@ jobs:
             up -d --build --wait --wait-timeout 240
           docker compose -f deploy/docker-compose.yml -p swd-dz4-ci ps
 
-      # -------------------------
-      # Smoke checks
-      # -------------------------
+      # -------- Smoke checks --------
       - name: Smoke check ApiGateway
         run: |
-          curl -fsS http://localhost:8080/health \
-            || curl -fsS http://localhost:8080/health/live
+          curl -fsS http://localhost:8080/health || curl -fsS http://localhost:8080/health/live
 
       - name: Smoke check Frontend
         if: steps.fe.outputs.present == 'true'
         run: curl -fsS http://localhost:8083/
 
-      # -------------------------
-      # Tests
-      # -------------------------
+      # -------- Tests --------
       - name: Run backend tests
         run: dotnet test ./tests -c Release --logger "trx;LogFileName=test-results.trx"
 
-      # -------------------------
-      # Artifacts
-      # -------------------------
+      # -------- Artifacts --------
       - name: Collect compose logs
         if: always()
         run: |
@@ -189,9 +174,7 @@ jobs:
           name: test-results
           path: "**/*.trx"
 
-      # -------------------------
-      # Cleanup
-      # -------------------------
+      # -------- Cleanup --------
       - name: Docker Compose Down
         if: always()
         run: docker compose -f deploy/docker-compose.yml -p swd-dz4-ci down -v --remove-orphans
