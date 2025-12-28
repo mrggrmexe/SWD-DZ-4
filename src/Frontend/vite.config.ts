@@ -7,7 +7,7 @@ export default defineConfig({
     proxy: {
       "/orders": "http://localhost:8080",
       "/accounts": "http://localhost:8080",
-      "/health": "http://localhost:8080",
-    },
-  },
+      "/health": "http://localhost:8080"
+    }
+  }
 });
