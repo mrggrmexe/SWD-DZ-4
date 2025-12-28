@@ -23,17 +23,23 @@ env:
 jobs:
   build-run-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
 
     steps:
-      - name: Checkout
+      # -------------------------
+      # Checkout
+      # -------------------------
+      - name: Checkout repository
         uses: actions/checkout@v5
 
+      # -------------------------
+      # Docker / Compose
+      # -------------------------
       - name: Ensure Docker Compose
         uses: docker/setup-compose-action@v1
 
       # -------------------------
-      # Backend (.NET)
+      # .NET 9
       # -------------------------
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v5
@@ -48,59 +54,80 @@ jobs:
           restore-keys: |
             nuget-${{ runner.os }}-
 
-      - name: Detect solution file
+      # -------------------------
+      # Detect solution (ANYWHERE) or fallback
+      # -------------------------
+      - name: Detect solution or fallback to csproj build
         id: sln
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f "AsyncShopPlatform.sln" ]; then
-            echo "path=AsyncShopPlatform.sln" >> $GITHUB_OUTPUT
+
+          SLN="$(find . \
+            -type f -name '*.sln' \
+            -not -path './.git/*' \
+            -not -path './.github/*' \
+            -not -path './**/node_modules/*' \
+            -not -path './**/bin/*' \
+            -not -path './**/obj/*' \
+            | head -n 1 || true)"
+
+          if [ -n "$SLN" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "path=$SLN" >> "$GITHUB_OUTPUT"
+            echo "Solution found: $SLN"
           else
-            SLN="$(ls -1 *.sln 2>/dev/null | head -n 1 || true)"
-            if [ -z "$SLN" ]; then
-              echo "No .sln found in repo root. Put solution in root or update workflow." >&2
-              exit 1
-            fi
-            echo "path=$SLN" >> $GITHUB_OUTPUT
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "path=" >> "$GITHUB_OUTPUT"
+            echo "No .sln found. Will build via ./src fallback."
           fi
-          echo "Using solution: $(grep -E '^path=' $GITHUB_OUTPUT | cut -d= -f2)"
-
-      - name: Restore (Backend)
-        run: dotnet restore "${{ steps.sln.outputs.path }}"
-
-      - name: Build (Backend, Release)
-        run: dotnet build "${{ steps.sln.outputs.path }}" -c Release --no-restore
 
       # -------------------------
-      # Frontend (optional)
+      # Backend restore / build
+      # -------------------------
+      - name: Restore backend (via SLN)
+        if: steps.sln.outputs.found == 'true'
+        run: dotnet restore "${{ steps.sln.outputs.path }}"
+
+      - name: Build backend (via SLN)
+        if: steps.sln.outputs.found == 'true'
+        run: dotnet build "${{ steps.sln.outputs.path }}" -c Release --no-restore
+
+      - name: Restore backend (fallback via src)
+        if: steps.sln.outputs.found != 'true'
+        run: dotnet restore ./src
+
+      - name: Build backend (fallback via src)
+        if: steps.sln.outputs.found != 'true'
+        run: dotnet build ./src -c Release --no-restore
+
+      # -------------------------
+      # Frontend
       # -------------------------
       - name: Detect frontend
         id: fe
         shell: bash
         run: |
-          set -euo pipefail
           if [ -f "src/Frontend/package.json" ]; then
-            echo "present=true" >> $GITHUB_OUTPUT
+            echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "present=false" >> $GITHUB_OUTPUT
+            echo "present=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "Frontend present: $(grep -E '^present=' $GITHUB_OUTPUT | cut -d= -f2)"
 
-      - name: Setup Node (Frontend)
+      - name: Setup Node 20
         if: steps.fe.outputs.present == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: |
-            src/Frontend/package-lock.json
+          cache-dependency-path: src/Frontend/package-lock.json
 
       - name: Frontend install
         if: steps.fe.outputs.present == 'true'
         working-directory: src/Frontend
         run: npm ci
 
-      - name: Frontend test (if present)
+      - name: Frontend test
         if: steps.fe.outputs.present == 'true'
         working-directory: src/Frontend
         run: npm test --if-present
@@ -111,65 +138,60 @@ jobs:
         run: npm run build
 
       # -------------------------
-      # Run stack (docker compose)
+      # Docker Compose
       # -------------------------
-      - name: Compose config validate
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f "deploy/docker-compose.yml"
-          docker compose -f deploy/docker-compose.yml config > /dev/null
+      - name: Validate docker-compose
+        run: docker compose -f deploy/docker-compose.yml config > /dev/null
 
       - name: Docker Compose Up (build + wait)
-        shell: bash
         run: |
-          set -euo pipefail
-          docker compose -f deploy/docker-compose.yml -p swd-dz4-ci up -d --build --wait --wait-timeout 180
+          docker compose -f deploy/docker-compose.yml -p swd-dz4-ci \
+            up -d --build --wait --wait-timeout 240
           docker compose -f deploy/docker-compose.yml -p swd-dz4-ci ps
 
-      - name: Smoke check (ApiGateway)
-        shell: bash
+      # -------------------------
+      # Smoke checks
+      # -------------------------
+      - name: Smoke check ApiGateway
         run: |
-          set -euo pipefail
-          curl -fsS http://localhost:8080/health >/dev/null || curl -fsS http://localhost:8080/health/live >/dev/null
+          curl -fsS http://localhost:8080/health \
+            || curl -fsS http://localhost:8080/health/live
 
-      - name: Smoke check (Frontend)
+      - name: Smoke check Frontend
         if: steps.fe.outputs.present == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS http://localhost:8083/ >/dev/null
+        run: curl -fsS http://localhost:8083/
 
       # -------------------------
       # Tests
       # -------------------------
-      - name: Test (Backend)
+      - name: Run backend tests
         run: dotnet test ./tests -c Release --logger "trx;LogFileName=test-results.trx"
 
       # -------------------------
-      # Artifacts & cleanup
+      # Artifacts
       # -------------------------
-      - name: Compose logs (always)
+      - name: Collect compose logs
         if: always()
-        shell: bash
         run: |
           docker compose -f deploy/docker-compose.yml -p swd-dz4-ci logs --no-color > compose-logs.txt || true
 
-      - name: Upload compose logs (always)
+      - name: Upload compose logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: compose-logs
           path: compose-logs.txt
 
-      - name: Upload test results (always)
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: |
-            **/*.trx
+          path: "**/*.trx"
 
-      - name: Docker Compose Down (always)
+      # -------------------------
+      # Cleanup
+      # -------------------------
+      - name: Docker Compose Down
         if: always()
         run: docker compose -f deploy/docker-compose.yml -p swd-dz4-ci down -v --remove-orphans

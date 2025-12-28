@@ -1,9 +1,21 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFramework>net9.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-    </PropertyGroup>
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- Контракты не пакуем как NuGet в рамках ДЗ -->
+    <IsPackable>false</IsPackable>
+
+    <!-- Удобно для документации/Swagger -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+
+    <!-- Стабильное имя сборки/неймспейса (важно для сообщений) -->
+    <AssemblyName>Swd.Dz4.Contracts</AssemblyName>
+    <RootNamespace>Swd.Dz4.Contracts</RootNamespace>
+  </PropertyGroup>
 
 </Project>

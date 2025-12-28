@@ -1,6 +1,7 @@
 namespace OrdersService.Api.Dtos;
 
-public class CreateOrderResponse
+public sealed record CreateOrderResponse
 {
-    
+    public required Guid OrderId { get; init; }
+    public required string Status { get; init; }
 }
