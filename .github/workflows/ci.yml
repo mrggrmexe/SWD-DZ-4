@@ -69,33 +69,35 @@ jobs:
           fi
 
       # -------- Restore/Build with fallback --------
-      - name: Restore backend (try SLN, fallback to src)
+            - name: Restore backend
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ steps.sln.outputs.found }}" = "true" ]; then
-            echo "Trying restore with solution: ${{ steps.sln.outputs.path }}"
-            if dotnet restore "${{ steps.sln.outputs.path }}"; then
-              echo "Solution restore OK"
-              exit 0
-            fi
-            echo "Solution restore FAILED, fallback to ./src"
-          fi
-          dotnet restore ./src
 
-      - name: Build backend (try SLN, fallback to src)
+          if [ "${{ steps.sln.outputs.found }}" = "true" ]; then
+            echo "Trying restore with solution"
+            if dotnet restore "${{ steps.sln.outputs.path }}"; then
+              exit 0
+            fi
+            echo "Solution restore failed, fallback to csproj"
+          fi
+
+          dotnet restore $(find src -name '*.csproj')
+
+      - name: Build backend
         shell: bash
         run: |
           set -euo pipefail
+
           if [ "${{ steps.sln.outputs.found }}" = "true" ]; then
-            echo "Trying build with solution: ${{ steps.sln.outputs.path }}"
+            echo "Trying build with solution"
             if dotnet build "${{ steps.sln.outputs.path }}" -c Release --no-restore; then
-              echo "Solution build OK"
               exit 0
             fi
-            echo "Solution build FAILED, fallback to ./src"
+            echo "Solution build failed, fallback to csproj"
           fi
-          dotnet build ./src -c Release --no-restore
+
+          dotnet build $(find src -name '*.csproj') -c Release --no-restore
 
       # -------- Frontend --------
       - name: Detect frontend
