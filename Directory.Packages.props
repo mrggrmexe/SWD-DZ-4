@@ -1,0 +1,25 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- API Gateway -->
+    <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
+
+    <!-- Swagger -->
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="6.7.3" />
+
+    <!-- Messaging -->
+    <PackageVersion Include="MassTransit" Version="8.5.7" />
+    <PackageVersion Include="MassTransit.Testing" Version="8.5.7" />
+
+    <!-- Tests -->
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.9" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.9.0" />
+    <PackageVersion Include="FluentAssertions" Version="6.12.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.0.0" />
+  </ItemGroup>
+</Project>
