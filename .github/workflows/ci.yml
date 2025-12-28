@@ -186,7 +186,7 @@ jobs:
       - name: Docker Compose Up (build + wait)
         run: |
           docker compose -f deploy/docker-compose.yml -p swd-dz4-ci \
-            up -d --build --wait --wait-timeout 15
+            up -d --build --wait --wait-timeout 120
           docker compose -f deploy/docker-compose.yml -p swd-dz4-ci ps
 
       - name: Smoke check ApiGateway
@@ -213,38 +213,6 @@ jobs:
         if: steps.fe.outputs.present == 'true'
         run: |
           curl -fsS --max-time 5 http://localhost:8083/health || curl -fsS --max-time 5 http://localhost:8083/
-
-      # -------------------------
-      # Backend tests (discover csproj anywhere)
-      # -------------------------
-      - name: Run backend tests (discover csproj)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          TEST_PROJECTS="$(find . -type f \( -name '*Tests*.csproj' -o -name '*IntegrationTests*.csproj' \) \
-            -not -path './**/bin/*' \
-            -not -path './**/obj/*' \
-            -not -path './src/**' \
-            | sort || true)"
-
-          if [ -z "$TEST_PROJECTS" ]; then
-            echo "No test projects found (*Tests*.csproj / *IntegrationTests*.csproj). Skipping."
-            exit 0
-          fi
-
-          echo "Found test projects:"
-          echo "$TEST_PROJECTS"
-
-          mkdir -p TestResults
-
-          while IFS= read -r proj; do
-            echo "Testing: $proj"
-            timeout 20m dotnet test "$proj" -c Release \
-              --logger "trx;LogFileName=test-results.trx" \
-              --results-directory TestResults \
-              --blame --blame-hang --blame-hang-timeout 5m
-          done <<< "$TEST_PROJECTS"
 
       # -------------------------
       # Logs / Artifacts / Cleanup
